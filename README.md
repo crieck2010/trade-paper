@@ -1,0 +1,110 @@
+# trade-paper
+
+Paper-trading execution engine for the [trade-suite](https://github.com/crieck2010/trade-suite).
+Takes the output of `trade-agents` (research desk) through `trade-risk` review and
+routes it to a broker — **paper only, never live**.
+
+```
+trade-data-* ──bars──▶ trade-agents Desk ──orders──▶ trade-risk review
+                                                        │
+                                              trade-paper pipeline
+                                                        │  (paper-only guard)
+                                              Alpaca paper  │  FakeBroker (tests)
+```
+
+## What it does
+
+- **Broker abstraction** — one `Broker` interface; `AlpacaBroker` (paper endpoint
+  only, enforced in code) and `FakeBroker` (in-memory, for tests and dry runs).
+- **Discovery chain** — screens the `trade-strategies` registry across equities +
+  crypto, backtests long/short candidates on multiple assets, filters for
+  **non-correlated** books, then walks each discovery up the chain of command:
+  screening → PM rank → risk review → **your approval**. Nothing trades without
+  your sign-off (a future top-line agent plugs into the same queue).
+- **3×-daily runner** — `trade-paper run` executes one cycle: fetch bars →
+  discover → trade approved strategies → reconcile → snapshot equity.
+  Default slots 10:00 / 13:00 / 15:30 America/New_York, weekdays.
+- **Audit ledger** — SQLite record of every order state transition, fill,
+  approval, discovery, and equity snapshot. Any decision can be replayed.
+- **Idempotency** — deterministic client order IDs, so a crash-and-retry can
+  never double-submit.
+- **Reconciliation** — diffs the ledger against the broker's actual positions
+  and reports drift instead of silently fixing it.
+- **Fidelity report** — realized slippage vs. backtest assumption per strategy:
+  the honest number on which strategies survive contact with the market.
+
+## Safety
+
+- The engine **cannot trade live**: `AlpacaBroker` raises `PaperSafetyError`
+  unless constructed for the paper endpoint, and refuses unexpected hosts.
+- Paper trading only. Research and education — not investment advice.
+
+## Quick start
+
+```bash
+pip install trade-paper
+pip install "trade-paper[alpaca]"          # for the Alpaca adapter (alpaca-py)
+
+trade-paper init --config paper-config.json   # write a starter config
+# edit paper-config.json: symbols, schedule, discovery thresholds
+
+export APCA_API_KEY_ID=... APCA_API_SECRET_KEY=...   # free paper keys at alpaca.markets
+
+trade-paper discover --config paper-config.json  # screen strategies, no trading
+trade-paper schedule --print-cron                # 3x-daily crontab recipe
+trade-paper run --config paper-config.json       # one full cycle
+trade-paper approvals                            # discoveries awaiting YOU
+trade-paper approve 3                            # approve -> trades next cycle
+trade-paper status                               # account, positions, approvals
+trade-paper reconcile                            # ledger vs broker drift
+trade-paper fidelity                             # backtest-vs-paper slippage
+```
+
+Dry run without keys:
+
+```bash
+# set "broker": {"name": "fake"} and "data_source": "demo" in the config
+trade-paper run --config paper-config.json --force
+```
+
+## Configuration
+
+See [`examples/paper-config.json`](examples/paper-config.json). Key sections:
+
+| Section | Purpose |
+|---|---|
+| `symbols_equities` / `symbols_crypto` | traded universe (both from day one) |
+| `discovery` | min Sharpe, max drawdown, min trades, max pairwise correlation, top-N |
+| `schedule` | 3×-daily slots, timezone, weekdays-only |
+| `risk` | pre-trade limits re-checked against live positions |
+| `broker` | `alpaca` (paper) or `fake`; `dry_run` logs without submitting |
+
+## Strategy lifecycle
+
+`discover` → chain (screen → PM rank → risk review) → `pending` approval →
+you `approve`/`reject` → 3×-daily runner trades approved strategies →
+fills sync to ledger → `fidelity` tells you the truth. Full detail in
+[`docs/STRATEGY_LIFECYCLE.md`](docs/STRATEGY_LIFECYCLE.md).
+
+## Interop
+
+| Sibling | Use |
+|---|---|
+| `trade-data-equities` / `trade-data-crypto` | delayed bars (lazy import) |
+| `trade-strategies` | screened registry (lazy import) |
+| `trade-backtest` | discovery backtests via `adapters.run_backtest` |
+| `trade-agents` | Desk signals + risk-agent review (lazy import) |
+| `trade-risk` | pre-trade limit re-check against live positions |
+| `trade-dashboard-web` / `trade-dashboard-desktop` | Paper tab (v0.1.1) reads the ledger |
+
+Zero mandatory dependencies — siblings load lazily with clear install hints.
+
+## Docs
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — module map and data flow
+- [`docs/ALPACA_SETUP.md`](docs/ALPACA_SETUP.md) — free paper keys, first run
+- [`docs/STRATEGY_LIFECYCLE.md`](docs/STRATEGY_LIFECYCLE.md) — discovery → approval → trading
+
+## License
+
+MIT. Paper trading only — never live, never financial advice.

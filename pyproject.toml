@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trade-paper"
+version = "0.1.0"
+description = "Paper-trading execution engine for the trade-suite: Alpaca paper broker adapter, order pipeline, discovery chain, and 3x-daily runner."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "crieck2010" }]
+keywords = ["trading", "paper-trading", "alpaca", "backtesting", "execution"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Office/Business :: Financial",
+]
+dependencies = []
+
+[project.optional-dependencies]
+alpaca = ["alpaca-py>=0.28"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+trade-paper = "trade_paper.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/crieck2010/trade-paper"
+Repository = "https://github.com/crieck2010/trade-paper"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -105,6 +105,51 @@ Zero mandatory dependencies — siblings load lazily with clear install hints.
 - [`docs/ALPACA_SETUP.md`](docs/ALPACA_SETUP.md) — free paper keys, first run
 - [`docs/STRATEGY_LIFECYCLE.md`](docs/STRATEGY_LIFECYCLE.md) — discovery → approval → trading
 
+## The maths
+
+**What you learn.** Whether paper-trading reality matches your backtest
+assumptions — per strategy, in basis points — plus an auditable ledger of
+every order, fill, approval, and equity snapshot.
+
+**Why it matters.** The fidelity gap between assumed and realized costs is
+where strategies die on contact with the market. trade-paper measures that
+gap explicitly instead of letting you discover it in a live account, and
+its idempotency and reconciliation maths exist so a crash can never
+double-submit or silently drift from the broker's truth.
+
+**The maths.**
+
+- *Fidelity report* (`fidelity.report`): per fill, realized slippage in bps
+  is `(fill_price / signal_price − 1) × 10,000` for buys (inverted for
+  sells), averaged per strategy and compared against the backtest
+  assumption (default 5 bps). The gap is `avg_realized − assumed`, and the
+  verdict is `OK` when `avg_realized ≤ 1.5 × assumed`, else `CHECK` — a
+  hard number on which strategies survive contact with the market.
+- *Idempotency*: deterministic client order IDs (derived from strategy,
+  symbol, side, and timestamp) — a crash-and-retry replays the same ID, so
+  the broker dedupes instead of double-submitting.
+- *Reconciliation*: the SQLite ledger's positions are diffed against the
+  broker's actual positions; drift is *reported*, never silently corrected,
+  so the ledger stays an honest record rather than a self-fulfilling one.
+- *Discovery filter*: candidate strategies must clear min Sharpe, max
+  drawdown, and min-trades bars, and the surviving books are filtered for
+  **non-correlated** pairs (max pairwise correlation cap) before anything
+  reaches your approval queue.
+- *Runner cadence*: 3×-daily slots (10:00 / 13:00 / 15:30 America/New_York,
+  weekdays) — each cycle is fetch bars → discover → trade approved →
+  reconcile → snapshot equity.
+
+**Honest limitations.**
+
+- Alpaca paper fills are simulated; they understate real market impact and
+  say nothing about borrow availability for shorts.
+- Fill latency is recorded but not modeled — the backtest's "fill at next
+  open" and the runner's 3×-daily cadence are different execution realities.
+- Slippage is measured against the signal price, so a stale signal flatters
+  the fill; keep signal-to-submit latency short.
+- The engine cannot see corporate actions in the ledger — reconcile
+  positions after splits or special dividends.
+
 ## License
 
 MIT. Paper trading only — never live, never financial advice.

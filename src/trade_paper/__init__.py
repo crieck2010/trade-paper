@@ -13,16 +13,29 @@ Paper-only.  Research and education -- not investment advice.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .config import PaperConfig
-from .exceptions import BrokerError, ConfigError, PaperSafetyError, TradePaperError
+from .exceptions import (
+    BrokerError,
+    ConfigError,
+    MCPAuthError,
+    MCPError,
+    MCPToolError,
+    MCPTransportError,
+    PaperSafetyError,
+    TradePaperError,
+)
 
 __all__ = [
     "__version__",
     "PaperConfig",
     "BrokerError",
     "ConfigError",
+    "MCPAuthError",
+    "MCPError",
+    "MCPToolError",
+    "MCPTransportError",
     "PaperSafetyError",
     "TradePaperError",
 ]

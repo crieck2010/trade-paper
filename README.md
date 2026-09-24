@@ -30,6 +30,10 @@ trade-data-* ──bars──▶ trade-agents Desk ──orders──▶ trade-r
   never double-submit.
 - **Reconciliation** — diffs the ledger against the broker's actual positions
   and reports drift instead of silently fixing it.
+- **Robinhood MCP (read-only)** — optional introspection adapter for
+  Robinhood's official Trading MCP server: accounts, positions, order
+  history, and a paper-ledger-vs-broker drift check. No order placement;
+  see [`docs/ROBINHOOD_MCP.md`](docs/ROBINHOOD_MCP.md).
 - **Fidelity report** — realized slippage vs. backtest assumption per strategy:
   the honest number on which strategies survive contact with the market.
 
@@ -103,6 +107,7 @@ Zero mandatory dependencies — siblings load lazily with clear install hints.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — module map and data flow
 - [`docs/ALPACA_SETUP.md`](docs/ALPACA_SETUP.md) — free paper keys, first run
+- [`docs/ROBINHOOD_MCP.md`](docs/ROBINHOOD_MCP.md) — read-only Robinhood MCP setup
 - [`docs/STRATEGY_LIFECYCLE.md`](docs/STRATEGY_LIFECYCLE.md) — discovery → approval → trading
 
 ## The maths

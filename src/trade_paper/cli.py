@@ -147,6 +147,85 @@ def cmd_fidelity(args) -> int:
     return 0
 
 
+_ROBINHOOD_SETUP_MSG = """Robinhood MCP is not connected.
+
+  1. In Robinhood (desktop): enable Agentic trading, create/connect an
+     Agentic account, and complete the OAuth flow for your MCP client.
+  2. export ROBINHOOD_MCP_TOKEN=<token from YOUR OWN OAuth flow>
+     Keep it in your environment / Secure Vault -- never in code or repos.
+
+This adapter is READ-ONLY (accounts, positions, order history). Order
+placement is NOT implemented. Full setup: docs/ROBINHOOD_MCP.md
+Offline demo: trade-paper robinhood <action> --demo"""
+
+
+def _rh_table(rows: list[dict], cols: list[str]) -> None:
+    widths = [max([len(c)] + [len(str(r.get(c, ""))) for r in rows]) for c in cols]
+    print("  ".join(c.ljust(w) for c, w in zip(cols, widths)))
+    print("  ".join("-" * w for w in widths))
+    for r in rows:
+        print("  ".join(str(r.get(c, "")).ljust(w) for c, w in zip(cols, widths)))
+    if not rows:
+        print("(none)")
+
+
+def _rh_pick_account(broker, account_id):
+    if account_id:
+        return account_id
+    accounts = broker.get_accounts()
+    if not accounts:
+        raise SystemExit("error: MCP server returned no accounts")
+    first = accounts[0]
+    return first.get("account_id") or first.get("id") or ""
+
+
+def cmd_robinhood(args) -> int:
+    from . import robinhood_mcp as rh
+
+    if args.demo:
+        broker = rh.RobinhoodMCPBroker(transport=rh.MockMCPTransport.demo())
+    else:
+        try:
+            broker = rh.RobinhoodMCPBroker()
+        except rh.MCPAuthError:
+            print(_ROBINHOOD_SETUP_MSG, file=sys.stderr)
+            return 2
+
+    as_json = args.format == "json"
+    if args.action == "accounts":
+        data = broker.get_accounts()
+        cols = ["account_id", "nickname", "type"]
+    elif args.action == "positions":
+        acct = _rh_pick_account(broker, args.account)
+        data = broker.get_positions(acct)
+        cols = ["symbol", "quantity", "avg_price", "market_price"]
+    elif args.action == "orders":
+        acct = _rh_pick_account(broker, args.account)
+        data = broker.get_orders(acct)
+        cols = ["order_id", "symbol", "side", "quantity", "price", "status"]
+    elif args.action == "reconcile":
+        if args.demo:
+            paper = {"AAPL": 10.0, "TSLA": 4.5, "NVDA": 2.0}  # deliberate drift
+            broker_pos = rh.broker_position_map(
+                broker.get_positions(_rh_pick_account(broker, args.account)))
+        else:
+            cfg = _load_cfg(args)
+            paper = rh.ledger_position_map(_ledger(cfg))
+            broker_pos = rh.broker_position_map(
+                broker.get_positions(_rh_pick_account(broker, args.account)))
+        result = rh.reconcile(paper, broker_pos)
+        print(json.dumps(result, indent=2))
+        return 0 if result["clean"] else 1
+    else:  # pragma: no cover - argparse constrains choices
+        raise SystemExit(f"unknown robinhood action {args.action!r}")
+
+    if as_json:
+        print(json.dumps(data, indent=2, default=str))
+    else:
+        _rh_table(data, cols)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="trade-paper",
                                 description="Paper-trading engine (paper only, never live).")
@@ -174,6 +253,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("status", help="account, positions, approvals", parents=[common]); s.set_defaults(fn=cmd_status)
     s = sub.add_parser("reconcile", help="ledger vs broker drift check", parents=[common]); s.set_defaults(fn=cmd_reconcile)
     s = sub.add_parser("fidelity", help="backtest-vs-paper slippage report", parents=[common]); s.set_defaults(fn=cmd_fidelity)
+    s = sub.add_parser("robinhood", help="read-only Robinhood MCP introspection", parents=[common])
+    s.add_argument("action", choices=["accounts", "positions", "orders", "reconcile"])
+    s.add_argument("--demo", action="store_true", help="use the scripted mock MCP server (offline)")
+    s.add_argument("--account", default=None, help="account id (default: first account)")
+    s.add_argument("--format", choices=["table", "json"], default="table")
+    s.set_defaults(fn=cmd_robinhood)
     s = sub.add_parser("license", help="license status", parents=[common]); s.set_defaults(fn=lambda a: (print(licensing.is_licensed()), 0)[1])
     s = sub.add_parser("update-check", help="check for a newer release", parents=[common])
     s.set_defaults(fn=lambda a: (print(json.dumps(licensing.check_for_updates(), indent=2)), 0)[1])

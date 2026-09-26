@@ -1,3 +1,23 @@
+Metadata-Version: 2.4
+Name: trade-paper
+Version: 0.2.0
+Summary: Paper-trading execution engine for the trade-suite: Alpaca paper broker adapter, read-only Robinhood MCP introspection, order pipeline, discovery chain, and 3x-daily runner.
+Author: crieck2010
+License: MIT
+Project-URL: Homepage, https://github.com/crieck2010/trade-paper
+Project-URL: Repository, https://github.com/crieck2010/trade-paper
+Keywords: trading,paper-trading,alpaca,backtesting,execution
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Office/Business :: Financial
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Provides-Extra: alpaca
+Requires-Dist: alpaca-py>=0.28; extra == "alpaca"
+Provides-Extra: dev
+Requires-Dist: pytest>=7; extra == "dev"
+
 # trade-paper
 
 Paper-trading execution engine for the [trade-suite](https://github.com/crieck2010/trade-suite).
@@ -90,15 +110,6 @@ you `approve`/`reject` → 3×-daily runner trades approved strategies →
 fills sync to ledger → `fidelity` tells you the truth. Full detail in
 [`docs/STRATEGY_LIFECYCLE.md`](docs/STRATEGY_LIFECYCLE.md).
 
-## Regime context on approvals
-
-Approval payloads carry a regime block (`payload["regime"]` / `payload["chain"]["regime"]`,
-attached by trade-agents) explaining the market-regime conviction and sizing the desk used.
-It is informational only — you decide. Read the pinned contract in
-[`docs/REGIME.md`](docs/REGIME.md), and see it at a glance with
-`trade-paper approvals --format table` (id, strategy, symbols, status, conviction,
-hysteresis state, size scale, staleness/fallback flag).
-
 ## Interop
 
 | Sibling | Use |
@@ -118,7 +129,6 @@ Zero mandatory dependencies — siblings load lazily with clear install hints.
 - [`docs/ALPACA_SETUP.md`](docs/ALPACA_SETUP.md) — free paper keys, first run
 - [`docs/ROBINHOOD_MCP.md`](docs/ROBINHOOD_MCP.md) — read-only Robinhood MCP setup
 - [`docs/STRATEGY_LIFECYCLE.md`](docs/STRATEGY_LIFECYCLE.md) — discovery → approval → trading
-- [`docs/REGIME.md`](docs/REGIME.md) — regime-block contract in approval chain JSON
 
 ## The maths
 

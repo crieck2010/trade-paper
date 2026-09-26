@@ -91,6 +91,34 @@ def cmd_approvals(args) -> int:
     cfg = _load_cfg(args)
     ledger = _ledger(cfg)
     rows = ledger.list_approvals(status=args.status)
+    if getattr(args, "format", "json") == "table":
+        from .regime import approval_regime, regime_flag
+        header = ["id", "strategy", "symbols", "status",
+                  "conviction", "hysteresis", "size_scale", "flag"]
+        lines = []
+        for r in rows:
+            reg = approval_regime(r)
+            conv = reg.get("conviction") if reg else None
+            hyst = reg.get("hysteresis_state") if reg else None
+            size = reg.get("size_scale_applied") if reg else None
+            lines.append([
+                str(r.get("id", "")),
+                str(r.get("strategy", "")),
+                str(r.get("symbols", "")),
+                str(r.get("status", "")),
+                ("%.1f" % conv) if isinstance(conv, (int, float)) else "-",
+                str(hyst) if hyst is not None else "-",
+                ("%.3f" % size) if isinstance(size, (int, float)) else "-",
+                regime_flag(reg),
+            ])
+        widths = [len(h) for h in header]
+        for ln in lines:
+            widths = [max(w, len(c)) for w, c in zip(widths, ln)]
+        fmt = "  ".join("{:<%d}" % w for w in widths)
+        print(fmt.format(*header))
+        for ln in lines:
+            print(fmt.format(*ln))
+        return 0
     print(json.dumps(rows, indent=2, default=str))
     return 0
 
@@ -245,7 +273,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("schedule", help="show the 3x-daily schedule", parents=[common])
     s.add_argument("--print-cron", action="store_true"); s.set_defaults(fn=cmd_schedule)
     s = sub.add_parser("approvals", help="list strategy approvals", parents=[common])
-    s.add_argument("--status", default="pending"); s.set_defaults(fn=cmd_approvals)
+    s.add_argument("--status", default="pending")
+    s.add_argument("--format", choices=["table", "json"], default="json",
+                   help="table: at-a-glance regime context; json: full rows (default)")
+    s.set_defaults(fn=cmd_approvals)
     s = sub.add_parser("approve", help="approve a discovery (final: you)", parents=[common])
     s.add_argument("id", type=int); s.add_argument("--reason", default=""); s.set_defaults(fn=cmd_approve)
     s = sub.add_parser("reject", help="reject a discovery", parents=[common])

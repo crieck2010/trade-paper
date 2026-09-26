@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.0 — 2026-09-26
+
+- **Regime context on the approval gate (read-only, informational).** trade-agents
+  attaches the pinned regime block to approval payloads as `payload["regime"]`
+  and `payload["chain"]["regime"]` (same dict); the ledger already stores the
+  chain verdict as JSON, so the block persists with **zero schema changes** and
+  the approval-queue mechanics and paper-only guard are untouched.
+- New `trade_paper.regime.approval_regime(row)` — extracts the regime block from
+  any `Ledger.list_approvals()` row (metrics already JSON-parsed); returns `None`
+  for approvals predating regime wiring and never raises on malformed rows.
+  (Placed in its own module so `ledger.py` keeps owning persistence only.)
+- New CLI: `trade-paper approvals --format table|json` (default `json`, fully
+  backwards compatible). `table` prints one compact row per approval — id,
+  strategy, symbols, status, conviction, hysteresis state, size scale,
+  staleness/fallback flag — the at-a-glance view of *why* the desk sized the
+  trade the way it did. The human stays the final gate.
+- New docs: `docs/REGIME.md` (contract shape, field semantics, staleness/fallback
+  meaning, informational-only guarantee); README section + docs index link.
+
 ## v0.2.0 — 2026-09-24
 
 - **Read-only Robinhood MCP adapter** (`trade_paper.robinhood_mcp`):

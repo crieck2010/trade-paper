@@ -1,6 +1,0 @@
-
-[alpaca]
-alpaca-py>=0.28
-
-[dev]
-pytest>=7

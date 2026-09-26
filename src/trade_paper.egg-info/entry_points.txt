@@ -1,2 +1,0 @@
-[console_scripts]
-trade-paper = trade_paper.cli:main

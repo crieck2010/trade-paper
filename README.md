@@ -99,6 +99,32 @@ It is informational only — you decide. Read the pinned contract in
 `trade-paper approvals --format table` (id, strategy, symbols, status, conviction,
 hysteresis state, size scale, staleness/fallback flag).
 
+### Pointed production strategies
+
+Approved strategies whose `trade-strategies` registry class sets
+`production = True` (currently only `regcond_1`, the executable form of
+lifecycle candidate REGCOND-1) bypass the research Desk: the runner streams
+the fetched bars through `Strategy.on_bar` in date order with forward-fill
+and turns only the latest bar's signals into orders. The target-weight
+contract is honored (`LONG` `strength` = target weight, `EXIT` = 0) and
+orders are sized as **deltas versus live broker positions** — a monthly
+rebalance trims/tops up legs instead of re-buying full targets. Sub-$250
+notional deltas are dropped as dust (`DUST_NOTIONAL_USD`). Everything else
+— approvals, risk gate, idempotency, reconciliation, ledger — is unchanged,
+and non-production approvals still flow through the Desk.
+
+`paper-config-regcond1.json` is the pointed dry-run config for REGCOND-1:
+FakeBroker, `dry_run=true`, SPY/CPER/TLT/GLD only, 500-day lookback,
+`strategy_allowlist=["regcond_1"]`, weekday 10:00/13:00/15:30
+America/New_York slots. Seed + approve the strategy row, then:
+
+```bash
+python3 -m trade_paper --config paper-config-regcond1.json run --force --no-discover
+```
+
+`--no-discover` keeps the pointed runner to its mandate: no new
+discoveries, only the approved production strategy.
+
 ## Interop
 
 | Sibling | Use |

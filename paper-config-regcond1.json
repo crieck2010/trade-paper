@@ -1,0 +1,47 @@
+{
+  "name": "regcond1-pointed",
+  "equity": 100000.0,
+  "symbols_equities": [
+    "SPY",
+    "CPER",
+    "TLT",
+    "GLD"
+  ],
+  "symbols_crypto": [],
+  "data_source": "delayed",
+  "db_path": "/home/hatch/.trade-paper/regcond1.db",
+  "assumed_slippage_bps": 5.0,
+  "discovery": {
+    "lookback_days": 500,
+    "min_sharpe": 1.0,
+    "max_drawdown": 0.2,
+    "min_trades": 10,
+    "max_pairwise_correlation": 0.6,
+    "top_n": 5,
+    "strategy_allowlist": [
+      "regcond_1"
+    ],
+    "min_bars": 120
+  },
+  "schedule": {
+    "slots": [
+      "10:00",
+      "13:00",
+      "15:30"
+    ],
+    "timezone": "America/New_York",
+    "weekdays_only": true
+  },
+  "risk": {
+    "max_position_pct": 0.65,
+    "max_gross_exposure": 1.0,
+    "max_daily_loss_pct": 0.03,
+    "kill_switch_enabled": true
+  },
+  "broker": {
+    "name": "fake",
+    "dry_run": true,
+    "api_key_env": "APCA_API_KEY_ID",
+    "api_secret_env": "APCA_API_SECRET_KEY"
+  }
+}

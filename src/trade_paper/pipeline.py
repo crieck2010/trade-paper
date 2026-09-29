@@ -14,6 +14,8 @@ plugs into the same approval queue (``decided_by="top-line-agent"``).
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from . import chain as chain_mod
 from . import discovery as discovery_mod
 from .brokers import Broker
@@ -45,6 +47,130 @@ def _desk_orders(bars_by_symbol: dict[str, list[dict]], equity: float,
                        "price": float(alloc.price or 0) or None,
                        "strategy": idea.strategy})
     return orders
+
+
+#: Orders smaller than this notional are dust from delta arithmetic, not
+#: real rebalancing intent; they are dropped before the risk gate.
+DUST_NOTIONAL_USD = 250.0
+
+
+def _production_strategy_orders(
+    bars_by_symbol: dict[str, list[dict]],
+    equity: float,
+    allow: set[tuple[str, str]],
+    positions: dict[str, float],
+) -> tuple[list[dict], set[tuple[str, str]]]:
+    """Run approved *production* strategies directly and express their signals
+    as orders sized as deltas versus current broker positions.
+
+    A strategy is a production strategy when its ``trade-strategies`` registry
+    class sets ``production = True`` (currently only ``regcond_1`` — the
+    executable form of lifecycle candidate REGCOND-1).  The fetched bars are
+    streamed through ``Strategy.on_bar`` in date order with forward-fill of
+    missing legs (the same hold policy as the validated design); only the
+    signals emitted on the latest bar become orders.  The target-weight
+    contract is honored: a LONG signal's ``strength`` is the target portfolio
+    weight, EXIT means target weight 0.  Target quantities are converted to
+    *deltas* versus live positions, so a rebalance trims or tops up legs
+    instead of re-buying the full target every cycle.
+
+    Returns ``(orders, desk_allow)``: pairs consumed by the production path
+    are removed from the desk path's allow set.  When ``trade-strategies``
+    is not installed, nothing is consumed and the desk path is unchanged.
+    """
+    try:
+        from trade_strategies import get_strategy
+        from trade_strategies.base import SignalAction
+    except ImportError:
+        return [], set(allow)
+
+    by_strategy: dict[str, set[str]] = {}
+    for strat_name, sym in allow:
+        by_strategy.setdefault(strat_name, set()).add(sym)
+
+    orders: list[dict] = []
+    consumed: set[tuple[str, str]] = set()
+    for strat_name, symbols in sorted(by_strategy.items()):
+        try:
+            cls = get_strategy(strat_name)
+        except KeyError:
+            continue  # unknown to trade-strategies: leave for the desk path
+        if not getattr(cls, "production", False):
+            continue
+        try:
+            strat = cls(sorted(symbols))
+        except ValueError as exc:
+            raise RuntimeError(
+                f"production strategy {strat_name!r} refused its approved "
+                f"symbol set: {exc}"
+            ) from exc
+
+        grid = _date_grid(
+            {s: bars_by_symbol[s] for s in symbols if bars_by_symbol.get(s)}
+        )
+        if not grid:
+            raise RuntimeError(
+                f"production strategy {strat_name!r} has no bars to stream"
+            )
+        latest_signals: list = []
+        for stamp, barset in grid:
+            latest_signals = strat.on_bar(stamp, barset)
+
+        latest_close = {s: float(bars_by_symbol[s][-1]["close"]) for s in symbols}
+        for sig in latest_signals:
+            price = latest_close.get(sig.symbol)
+            if not price:
+                continue
+            if sig.action is SignalAction.LONG:
+                signed_w = float(sig.strength)
+            elif sig.action is SignalAction.SHORT:
+                signed_w = -float(sig.strength)
+            else:  # EXIT (and any future flat action): target weight 0
+                signed_w = 0.0
+            target_qty = signed_w * equity / price
+            delta = target_qty - float(positions.get(sig.symbol, 0.0) or 0.0)
+            if abs(delta) * price < DUST_NOTIONAL_USD:
+                continue
+            orders.append({
+                "symbol": sig.symbol,
+                "side": Side.BUY if delta > 0 else Side.SELL,
+                "quantity": abs(delta),
+                "price": price,
+                "strategy": strat_name,
+            })
+        consumed |= {(strat_name, s) for s in symbols}
+    return orders, set(allow) - consumed
+
+
+def _date_grid(bars_by_symbol: dict[str, list[dict]]) -> list[tuple[object, dict]]:
+    """Union-date grid with forward-fill; timestamps are grid dates.
+
+    Returns ``[(datetime, {symbol: bar_dict}), ...]`` ascending.  A leg
+    missing on a grid date carries its last known bar (with its timestamp
+    rewritten to the grid date), matching the validated hold policy.
+    """
+    per_symbol: dict[str, dict] = {}
+    all_dates: set = set()
+    for sym, bars in bars_by_symbol.items():
+        by_date: dict = {}
+        for b in bars:
+            d = datetime.fromisoformat(str(b["timestamp"])).date()
+            by_date[d] = b
+            all_dates.add(d)
+        per_symbol[sym] = by_date
+    grid = []
+    carried: dict[str, dict] = {}
+    for d in sorted(all_dates):
+        barset: dict[str, dict] = {}
+        for sym, by_date in per_symbol.items():
+            if d in by_date:
+                carried[sym] = dict(by_date[d])
+            bar = dict(carried.get(sym, {}))
+            if bar:
+                bar["timestamp"] = datetime(d.year, d.month, d.day).isoformat()
+                barset[sym] = bar
+        grid.append((datetime(d.year, d.month, d.day), barset))
+    return grid
 
 
 def _to_order(spec: dict) -> Order:
@@ -123,8 +249,13 @@ def run_cycle(cfg: PaperConfig, broker: Broker, ledger: Ledger,
             for sym in str(ap["symbols"]).split(","):
                 allow.add((ap["strategy"], normalize_symbol(sym.strip())))
         if allow:
-            specs = _desk_orders(bars, cfg.equity, allow)
             live_positions = broker.get_positions()
+            prod_specs, desk_allow = _production_strategy_orders(
+                bars, cfg.equity, allow,
+                {p.symbol: float(p.quantity) for p in live_positions})
+            specs = list(prod_specs)
+            if desk_allow:
+                specs += _desk_orders(bars, cfg.equity, desk_allow)
             ok, vetoed = _risk_gate(specs, cfg.equity, cfg.risk, live_positions)
             summary["vetoed"] = [{"symbol": s["symbol"], "strategy": s.get("strategy")}
                                  for s in vetoed]

@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.4.0 — 2026-09-28
+
+- **Pointed production-strategy path** (`trade_paper.pipeline`): approved
+  strategies whose `trade-strategies` registry class sets
+  `production = True` (currently only `regcond_1`, the executable form of
+  lifecycle candidate REGCOND-1) are now run **directly** instead of through
+  the research Desk. The fetched bars are streamed through
+  `Strategy.on_bar` in date order with forward-fill; only the latest bar's
+  signals become orders. The target-weight contract is honored (LONG
+  `strength` = target weight, EXIT = 0) and orders are sized as **deltas
+  versus live broker positions**, so a monthly rebalance trims/tops up legs
+  instead of re-buying full targets every cycle. Sub-`$250` notional deltas
+  are dropped as dust. Consumed pairs are removed from the desk path; all
+  other approvals still flow through the Desk unchanged. Orders keep the
+  same approvals, risk gate, idempotency, reconciliation, and ledger as
+  before. `DUST_NOTIONAL_USD = 250.0`.
+- New `trade-paper/paper-config-regcond1.json`: pointed dry-run config for
+  REGCOND-1 — FakeBroker, `dry_run=true`, SPY/CPER/TLT/GLD only, delayed
+  keyless data, 500-day lookback, `strategy_allowlist=["regcond_1"]`,
+  `max_position_pct=0.65` (fits the 60% EXPANSION SPY leg), weekday
+  10:00/13:00/15:30 America/New_York slots.
+- `tests/test_production_strategy.py`: 7 tests (full-target-from-flat,
+  at-target silence, regime-flip trim/top-up incl. EXIT-leg liquidation,
+  mid-month quiet day, desk fall-through for non-production pairs, grid
+  forward-fill, loud failure on a wrong symbol set).
+
 ## v0.3.0 — 2026-09-26
 
 - **Regime context on the approval gate (read-only, informational).** trade-agents

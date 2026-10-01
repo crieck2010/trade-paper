@@ -227,6 +227,16 @@ def run_cycle(cfg: PaperConfig, broker: Broker, ledger: Ledger,
             raise RuntimeError("no bars fetched for any symbol")
         prices = {s: b[-1]["close"] for s, b in bars.items()}
 
+        # -- persistent paper portfolio ------------------------------------
+        # Seed cash once, then every run loads the position book + cash from
+        # the ledger into the session broker, so simulated fills compound
+        # across runs instead of evaporating with the in-memory broker.
+        ledger.ensure_cash(cfg.equity)
+        if hasattr(broker, "hydrate"):
+            broker.hydrate(ledger.open_positions(), ledger.get_cash())
+        if hasattr(broker, "set_prices"):
+            broker.set_prices(prices)
+
         # -- discovery: screening -> chain -> user approval queue -----------
         if discover:
             found = discovery_mod.screen(bars, cfg)
@@ -267,18 +277,23 @@ def run_cycle(cfg: PaperConfig, broker: Broker, ledger: Ledger,
                 ledger.record_order(order)
                 ledger.transition(order.client_order_id, OrderState.APPROVED,
                                   "user-approved strategy; risk passed")
-                if cfg.broker.dry_run:
+                if cfg.broker.dry_run and getattr(broker, "name", "") != "fake":
+                    # real broker in dry-run: log only, submit nothing
                     ledger.transition(order.client_order_id, OrderState.SUBMITTED,
                                       "dry-run: not sent to broker")
                     summary["orders"].append({"symbol": order.symbol, "dry_run": True})
                     continue
+                # live-paper submit, or dry-run simulated fills on the FakeBroker
+                # (fake touches no real venue, so simulating stays paper-only)
                 broker_id = broker.place_order(order)
                 ledger.record_order(order, broker_order_id=broker_id)
-                ledger.transition(order.client_order_id, OrderState.SUBMITTED,
-                                  f"broker id {broker_id}")
+                note = ("dry-run simulated fill" if cfg.broker.dry_run
+                        else f"broker id {broker_id}")
+                ledger.transition(order.client_order_id, OrderState.SUBMITTED, note)
                 summary["orders"].append(
                     {"symbol": order.symbol, "side": order.side.value,
-                     "quantity": order.quantity, "broker_id": broker_id})
+                     "quantity": order.quantity, "broker_id": broker_id,
+                     "dry_run": bool(cfg.broker.dry_run)})
 
         # -- sync fills from the broker into the ledger ----------------------
         known_fills = {r["client_order_id"] for r in ledger._db.execute(
@@ -291,12 +306,15 @@ def run_cycle(cfg: PaperConfig, broker: Broker, ledger: Ledger,
                         {"symbol": fill.symbol, "qty": fill.quantity,
                          "price": round(fill.price, 4)})
 
-        # -- reconcile + snapshot ------------------------------------------
+        # -- mark to market, then reconcile + snapshot ---------------------
+        if hasattr(broker, "update_market_prices"):
+            broker.update_market_prices(prices)
         from .reconcile import reconcile as _reconcile
         summary["reconciled"] = _reconcile(ledger, broker)
         acct = broker.get_account()
         ledger.snapshot_equity(acct.equity, acct.cash, note=f"run {run_id}")
         summary["equity"] = acct.equity
+        summary["cash"] = acct.cash
         ledger.finish_run(run_id, ok=True)
     except Exception as exc:  # never crash the scheduler silently
         summary["errors"].append(str(exc))

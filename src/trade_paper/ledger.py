@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS equity_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL,
     equity REAL NOT NULL, cash REAL NOT NULL, note TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS positions (
+    symbol TEXT PRIMARY KEY, quantity REAL NOT NULL,
+    avg_cost REAL NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS portfolio (
+    key TEXT PRIMARY KEY, value TEXT NOT NULL
+);
 """
 
 
@@ -108,7 +115,99 @@ class Ledger:
              fill.price, fill.commission, fill.filled_at.isoformat()),
         )
         self.transition(fill.client_order_id, OrderState.FILLED, "broker fill")
+        self._apply_fill(fill)
         self._db.commit()
+
+    # -- position book (derived from the immutable fills log) --------------
+    def _apply_fill(self, fill) -> None:
+        """Fold one fill into the persistent position book and cash.
+
+        Average-cost accounting (see docs/PNL_ACCOUNTING.md):
+          * add to an existing same-direction position -> volume-weighted avg
+          * partial close -> average cost unchanged
+          * flip (close + reverse) -> average cost resets to the fill price
+          * full close -> position row removed
+        Cash moves by fill proceeds minus commission.  A ledger that never
+        seeded cash starts at 0.0; production seeds via ``ensure_cash``.
+        """
+        dq = float(fill.quantity) if fill.side.value == "buy" else -float(fill.quantity)
+        px = float(fill.price)
+        comm = float(getattr(fill, "commission", 0.0) or 0.0)
+        row = self._db.execute("SELECT quantity, avg_cost FROM positions WHERE symbol=?",
+                               (fill.symbol,)).fetchone()
+        old_q = float(row["quantity"]) if row else 0.0
+        old_avg = float(row["avg_cost"]) if row else 0.0
+        new_q = old_q + dq
+        if new_q == 0:
+            self._db.execute("DELETE FROM positions WHERE symbol=?", (fill.symbol,))
+        elif old_q == 0:
+            new_avg = px
+            self._db.execute(
+                "INSERT OR REPLACE INTO positions (symbol, quantity, avg_cost, updated_at)"
+                " VALUES (?,?,?,?)",
+                (fill.symbol, new_q, new_avg, utcnow().isoformat()))
+        elif (old_q > 0) == (dq > 0):
+            new_avg = (old_avg * old_q + px * dq) / new_q
+            self._db.execute(
+                "UPDATE positions SET quantity=?, avg_cost=?, updated_at=? WHERE symbol=?",
+                (new_q, new_avg, utcnow().isoformat(), fill.symbol))
+        elif (old_q > 0) == (new_q > 0):
+            # partial close: average cost is unchanged
+            self._db.execute(
+                "UPDATE positions SET quantity=?, updated_at=? WHERE symbol=?",
+                (new_q, utcnow().isoformat(), fill.symbol))
+        else:
+            # flip: closed the old side and opened the reverse at this price
+            self._db.execute(
+                "UPDATE positions SET quantity=?, avg_cost=?, updated_at=? WHERE symbol=?",
+                (new_q, px, utcnow().isoformat(), fill.symbol))
+        cash = self._get_cash_raw()
+        if cash is None:
+            cash = 0.0
+        cash = cash - (px * float(fill.quantity) + comm) if dq > 0 else cash + (px * float(fill.quantity) - comm)
+        self._db.execute("INSERT OR REPLACE INTO portfolio (key, value) VALUES ('cash', ?)",
+                         (str(cash),))
+
+    def open_positions(self) -> list[dict]:
+        """Persistent position book: [{symbol, quantity, avg_cost}]."""
+        return [dict(r) for r in self._db.execute(
+            "SELECT symbol, quantity, avg_cost FROM positions WHERE quantity != 0")]
+
+    def position(self, symbol: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT symbol, quantity, avg_cost FROM positions WHERE symbol=?",
+            (symbol,)).fetchone()
+        return dict(row) if row else None
+
+    def _get_cash_raw(self) -> float | None:
+        row = self._db.execute("SELECT value FROM portfolio WHERE key='cash'").fetchone()
+        return float(row["value"]) if row else None
+
+    def get_cash(self) -> float | None:
+        """Seeded cash, or None when this ledger never ran a cycle."""
+        return self._get_cash_raw()
+
+    def ensure_cash(self, seed: float) -> float:
+        """Seed cash once (starting equity); afterwards return stored cash."""
+        cash = self._get_cash_raw()
+        if cash is None:
+            self._db.execute("INSERT INTO portfolio (key, value) VALUES ('cash', ?)",
+                             (str(float(seed)),))
+            self._db.commit()
+            return float(seed)
+        return cash
+
+    def replay_quantities(self) -> dict[str, float]:
+        """Recompute per-symbol quantities straight from the fills log.
+
+        Independent check on the position book: the book is supposed to be
+        exactly this replay folded with average-cost math.
+        """
+        out: dict[str, float] = {}
+        for r in self._db.execute("SELECT symbol, side, quantity FROM fills"):
+            dq = float(r["quantity"]) if r["side"] == "buy" else -float(r["quantity"])
+            out[r["symbol"]] = out.get(r["symbol"], 0.0) + dq
+        return {s: q for s, q in out.items() if q != 0}
 
     def get_order(self, client_order_id: str) -> dict | None:
         row = self._db.execute("SELECT * FROM orders WHERE client_order_id=?",

@@ -20,8 +20,9 @@ def test_fake_fill_and_position():
     pos = b.get_positions()[0]
     assert pos.quantity == 10
     acct = b.get_account()
-    assert acct.equity == pytest.approx(10_000.0, rel=1e-6)  # cash -> position
-    assert acct.cash == pytest.approx(10_000 - 10 * 100.05, rel=1e-6)  # 5bps slip
+    # cash -> position, minus 5bps slippage and $0.005/share commission
+    assert acct.cash == pytest.approx(10_000 - 10 * 100.05 - 10 * 0.005, rel=1e-6)
+    assert acct.equity == pytest.approx(10_000 - 10 * 0.005, rel=1e-6)  # commission drag
 
 
 def test_fake_idempotent_resubmit():

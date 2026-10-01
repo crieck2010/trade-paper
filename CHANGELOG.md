@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.5.0 — 2026-10-01
+
+- **Persistent paper P&L: every run is now a plumbing test AND a P&L test.**
+  `dry_run` orders on the FakeBroker are simulated to fills at market prices
+  (5 bps adverse slippage each way, \$0.005/share commission -- the same
+  conventions as trade-backtest's default `CostModel`) and recorded in the
+  SQLite ledger.  A persistent position book (`positions` table: quantity,
+  average cost, folded from the immutable fills log) plus seeded cash
+  (`portfolio` table) survives across runs: each cycle hydrates the session
+  broker from the ledger first, so positions compound instead of evaporating
+  with the in-memory broker.  Every run marks positions to the latest bar
+  close and snapshots equity = cash + Σ qty·mark -- on quiet days too, so
+  the equity curve is continuous.
+- **Corrected FakeBroker accounting** (found while building the above): a
+  full close used to credit both sale proceeds *and* the P&L (double count),
+  and a partial close reset average cost to the exit price.  Cash now
+  settles on proceeds-minus-commission only; partial closes keep the average
+  cost; flips reset it to the fill price -- the same math as the ledger
+  book.  `FakeBroker.hydrate()`, `set_prices()`, `update_market_prices()`.
+- **Reconciliation** now reads the persistent ledger book, cross-checks it
+  against a straight replay of the fills log (`book_diverged`), and compares
+  ledger cash vs broker cash (`cash_mismatch`, \$0.01 tolerance, only when
+  cash was seeded).  Same output shape, plus a `cash` block.
+- Dry-run semantics preserved: a *real* broker (Alpaca) in `dry_run` still
+  submits nothing and accrues no P&L; only the FakeBroker simulates.
+  CLI behavior, slot gating, approval queue, risk vetoes, paper-only guard,
+  and trade-lifecycle registry compatibility unchanged.
+- New docs: `docs/PNL_ACCOUNTING.md` (the fill/cash/avg-cost/MTM math and
+  honest limitations).  `tests/test_pnl.py`: 17 tests (book math incl.
+  add/partial-close/full-close/flip/short, cash settlement, broker hydrate +
+  MTM, reconcile with open positions incl. cash-mismatch and book-divergence,
+  dry-run end-to-end compounding across two fresh-broker cycles).
+- **Behavior change (intentional):** FakeBroker now charges \$0.005/share
+  commission by default, so simulated equity trails starting equity by the
+  commission drag even on a flat fill; `tests/test_brokers.py` updated.
+
 ## v0.4.0 — 2026-09-28
 
 - **Pointed production-strategy path** (`trade_paper.pipeline`): approved

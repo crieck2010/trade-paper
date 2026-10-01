@@ -1,20 +1,23 @@
 """Reconciliation: diff the local ledger against the broker's truth.
 
 Any drift (a position the broker shows that we don't know, a fill we missed,
-a quantity mismatch) is reported -- never silently fixed.
+a quantity mismatch, a cash mismatch) is reported -- never silently fixed.
+
+The ledger side now reads the persistent position book (``positions`` table,
+folded from the immutable fills log) instead of re-deriving quantities from
+order states, and cross-checks the book against a straight replay of the
+fills log to catch applier bugs.
 """
 
 from __future__ import annotations
 
+_CASH_TOLERANCE_USD = 0.01
+
 
 def reconcile(ledger, broker) -> dict:
     broker_positions = {p.symbol: p for p in broker.get_positions()}
-    ledger_positions: dict[str, float] = {}
-    for o in ledger.list_orders(limit=1000):
-        if o["state"] != "filled":
-            continue
-        q = float(o["quantity"]) * (1 if o["side"] == "buy" else -1)
-        ledger_positions[o["symbol"]] = ledger_positions.get(o["symbol"], 0.0) + q
+    ledger_positions = {p["symbol"]: float(p["quantity"])
+                        for p in ledger.open_positions()}
 
     drift = []
     for sym, bp in broker_positions.items():
@@ -31,6 +34,28 @@ def reconcile(ledger, broker) -> dict:
             drift.append({"symbol": sym, "kind": "missing_at_broker",
                           "broker": 0.0, "ledger": lq})
 
+    # -- the book must equal a straight replay of the fills log ------------
+    replay = ledger.replay_quantities()
+    for sym in set(ledger_positions) | set(replay):
+        lq = ledger_positions.get(sym, 0.0)
+        rq = replay.get(sym, 0.0)
+        if abs(lq - rq) > 1e-9:
+            drift.append({"symbol": sym, "kind": "book_diverged",
+                          "book": lq, "fills_replay": rq})
+
+    # -- cash must agree (only when the ledger has seeded cash) ------------
+    cash_info = None
+    ledger_cash = ledger.get_cash()
+    if ledger_cash is not None:
+        try:
+            broker_cash = float(broker.get_account().cash)
+        except Exception:
+            broker_cash = None
+        cash_info = {"broker": broker_cash, "ledger": ledger_cash}
+        if broker_cash is not None and abs(broker_cash - ledger_cash) > _CASH_TOLERANCE_USD:
+            drift.append({"symbol": "__cash__", "kind": "cash_mismatch",
+                          "broker": broker_cash, "ledger": ledger_cash})
+
     open_orders = [o for o in ledger.list_orders(limit=1000)
                    if o["state"] in ("submitted", "acknowledged", "partial")]
     return {
@@ -38,5 +63,6 @@ def reconcile(ledger, broker) -> dict:
         "ledger_positions": len([q for q in ledger_positions.values() if q]),
         "drift": drift,
         "open_orders": len(open_orders),
+        "cash": cash_info,
         "clean": not drift,
     }

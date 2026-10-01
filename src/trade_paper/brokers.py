@@ -161,19 +161,61 @@ class AlpacaBroker(Broker):
 
 class FakeBroker(Broker):
     """In-memory broker for tests and dry runs: instant fills at the last
-    known price plus configurable slippage."""
+    known price plus configurable slippage.
+
+    Cost model mirrors trade-backtest's default ``CostModel``: 5 bps adverse
+    slippage each way plus ``commission_per_share`` per share.  Sessions are
+    still in-memory, but state now survives across runs: ``hydrate`` loads
+    the persistent position book + cash (from the ledger) at run start, and
+    ``update_market_prices`` marks positions before the equity snapshot.
+    """
 
     name = "fake"
 
     def __init__(self, prices: dict[str, float] | None = None,
-                 slippage_bps: float = 5.0, equity: float = 100_000.0) -> None:
+                 slippage_bps: float = 5.0, equity: float = 100_000.0,
+                 commission_per_share: float = 0.005) -> None:
         self.prices = dict(prices or {})
         self.slippage_bps = slippage_bps
+        self.commission_per_share = commission_per_share
         self._positions: dict[str, Position] = {}
         self._orders: dict[str, dict] = {}
         self._fills: list[Fill] = []
         self._cash = float(equity)
         self.submitted: list[Order] = []
+
+    def hydrate(self, positions: list[dict], cash: float | None) -> None:
+        """Load persistent state (from the ledger) into this fresh session.
+
+        ``positions`` are ``{symbol, quantity, avg_cost}`` dicts as returned
+        by ``Ledger.open_positions``; market prices start at average cost and
+        are refreshed via ``update_market_prices``.  Session order/fill
+        history is reset -- the ledger remains the durable record.
+        """
+        self._positions = {}
+        for p in positions:
+            self._positions[p["symbol"]] = Position(
+                symbol=p["symbol"], quantity=float(p["quantity"]),
+                avg_entry_price=float(p["avg_cost"]),
+                market_price=float(p["avg_cost"]))
+        if cash is not None:
+            self._cash = float(cash)
+        self._orders = {}
+        self._fills = []
+        self.submitted = []
+
+    def set_prices(self, prices: dict[str, float] | None) -> None:
+        """Merge fresh market prices (e.g. latest bar closes) into the map."""
+        self.prices.update(prices or {})
+
+    def update_market_prices(self, prices: dict[str, float] | None) -> None:
+        """Mark open positions to the given prices (mark-to-market).
+
+        Symbols with no fresh price keep their last mark -- never invented.
+        """
+        for sym, pos in self._positions.items():
+            if prices and sym in prices:
+                pos.market_price = float(prices[sym])
 
     def _fill_price(self, order: Order) -> float:
         px = self.prices.get(order.symbol)
@@ -188,33 +230,38 @@ class FakeBroker(Broker):
             return self._orders[order.client_order_id]["broker_id"]
         broker_id = f"fake-{len(self._orders) + 1}"
         px = self._fill_price(order)
+        comm = self.commission_per_share * order.quantity
         self._orders[order.client_order_id] = {"broker_id": broker_id, "order": order}
         self.submitted.append(order)
         pos = self._positions.get(order.symbol)
         dq = order.quantity if order.side == Side.BUY else -order.quantity
-        if pos is None:
+        if pos is None or pos.quantity == 0:
             self._positions[order.symbol] = Position(
                 symbol=order.symbol, quantity=dq, avg_entry_price=px, market_price=px,
                 asset_class=order.asset_class)
         else:
             new_q = pos.quantity + dq
             if new_q == 0:
-                pnl = (px - pos.avg_entry_price) * pos.quantity
-                self._cash += pnl
-                del self._positions[order.symbol]
-            else:
+                del self._positions[order.symbol]  # proceeds below settle the cash
+            elif (pos.quantity > 0) == (dq > 0):
                 pos.avg_entry_price = (
-                    (pos.avg_entry_price * pos.quantity + px * dq) / new_q
-                    if (pos.quantity > 0) == (dq > 0) else px)
+                    (pos.avg_entry_price * pos.quantity + px * dq) / new_q)
+                pos.quantity = new_q
+                pos.market_price = px
+            elif (pos.quantity > 0) == (new_q > 0):
+                pos.quantity = new_q  # partial close: average entry is unchanged
+                pos.market_price = px
+            else:
+                pos.avg_entry_price = px  # flipped: new side opens at the fill price
                 pos.quantity = new_q
                 pos.market_price = px
         if order.side == Side.BUY:
-            self._cash -= px * order.quantity
+            self._cash -= px * order.quantity + comm
         else:
-            self._cash += px * order.quantity
+            self._cash += px * order.quantity - comm
         self._fills.append(Fill(client_order_id=order.client_order_id,
                                 symbol=order.symbol, side=order.side,
-                                quantity=order.quantity, price=px))
+                                quantity=order.quantity, price=px, commission=comm))
         order.state = OrderState.FILLED
         return broker_id
 

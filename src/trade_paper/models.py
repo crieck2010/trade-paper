@@ -109,7 +109,8 @@ class AccountSnapshot:
     equity: float
     cash: float
     buying_power: float
-    day_pnl: float = 0.0
+    # None = unknown.  Never mislabel another field (e.g. equity) as day P&L.
+    day_pnl: float | None = None
     at: datetime = field(default_factory=utcnow)
 
 

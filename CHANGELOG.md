@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.5.1 — 2026-10-01
+
+- **Fixed `AlpacaBroker.get_account` mislabeling equity as day P&L.** It now
+  reports `equity - last_equity` (the prior trading day's closing equity --
+  the honest day-P&L definition) and returns `None` when `last_equity` is
+  unavailable, rather than inventing a number. `AccountSnapshot.day_pnl` is
+  now `float | None` (default `None` = unknown); no pipeline code consumed
+  the old default, so nothing else changes. `Broker` ABC untouched.
+- **Mock-based AlpacaBroker test suite** (`tests/test_brokers_alpaca.py`,
+  17 tests, no network / credentials / alpaca-py): day-P&L math (regression
+  test for the bug above), order idempotency on `client_order_id`,
+  market-order submit mapping, GTC for crypto / DAY for equities, rejection
+  wrapping, cancel found/not-found, position asset-class mapping (incl.
+  crypto), fill filtering, `is_market_open` fail-closed, `PaperSafetyError`
+  on `paper=False`, `BrokerError` on missing credentials and on missing
+  alpaca-py (with the `trade-paper[alpaca]` install hint), endpoint-hint
+  refusal, and end-to-end fail-closed wiring through `make_broker` with
+  `broker.name="alpaca"` and no credentials (client never constructed).
+- Docs: `docs/ALPACA_SETUP.md` gains a minimal broker-config example, the
+  `dry_run` x broker-mode behavior table, and key-hygiene notes (env vars /
+  Secure Vault, never in chat or the repo).
+- `docs/VERIFICATION_FORWARD_PROOF_2026-10-01.md`: post-outage verification
+  of the v0.5.0 persistent-P&L stack (two forced runs, cron health, ledger
+  schema, legacy wart noted). The three `paper-runner-regcond1-*` cron
+  bodies were corrected: positions persist across runs since v0.5.0.
+
 ## v0.5.0 — 2026-10-01
 
 - **Persistent paper P&L: every run is now a plumbing test AND a P&L test.**

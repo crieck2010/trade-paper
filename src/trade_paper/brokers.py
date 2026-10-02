@@ -49,6 +49,22 @@ class Broker(ABC):
                                       strategy="__flatten__"))
 
 
+def _alpaca_day_pnl(account) -> float | None:
+    """Day P&L from an alpaca-py account object.
+
+    alpaca-py exposes no day-P&L field; ``last_equity`` is the prior trading
+    day's closing equity, so ``equity - last_equity`` is the honest day P&L.
+    Returns ``None`` when unavailable -- never mislabels equity as P&L.
+    """
+    try:
+        last = getattr(account, "last_equity", None)
+        if last is None:
+            return None
+        return float(account.equity) - float(last)
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
 class AlpacaBroker(Broker):
     """Alpaca paper-trading adapter (lazy ``alpaca-py`` import).
 
@@ -131,7 +147,7 @@ class AlpacaBroker(Broker):
         a = self._client.get_account()
         return AccountSnapshot(equity=float(a.equity), cash=float(a.cash),
                                buying_power=float(a.buying_power),
-                               day_pnl=float(getattr(a, "equity", 0) or 0))
+                               day_pnl=_alpaca_day_pnl(a))
 
     def is_market_open(self) -> bool:
         try:

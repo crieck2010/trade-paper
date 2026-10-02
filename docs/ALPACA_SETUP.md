@@ -41,6 +41,38 @@ export the keys, and run one cycle with `--force`. Then install the schedule:
 trade-paper schedule --print-cron   # paste into crontab -e
 ```
 
+## 5. Minimal config
+
+```json
+{
+  "broker": {
+    "name": "alpaca",
+    "dry_run": true,
+    "api_key_env": "APCA_API_KEY_ID",
+    "api_secret_env": "APCA_API_SECRET_KEY"
+  }
+}
+```
+
+`dry_run` semantics (same pipeline, ledger, and risk limits in every mode):
+
+| broker | dry_run | behavior |
+|---|---|---|
+| `fake` | true | orders simulated to fills at bar close (5 bps slippage + $0.005/share); P&L accrues in the ledger |
+| `alpaca` | true | orders logged only — **nothing is submitted** to Alpaca; no P&L accrues |
+| `alpaca` | false | orders submitted to the Alpaca **paper** endpoint; fills sync back into the ledger |
+
+Flip `dry_run` to `false` only after the dry-run cycles reconcile cleanly.
+Live trading is refused in code (`PaperSafetyError`) regardless of this flag.
+
+## Key hygiene
+
+- Paper keys are free at <https://alpaca.markets> and live in **environment
+  variables** (or the Secure Vault) — never in a config file, never in the
+  repo, never pasted into chat.
+- Without credentials the runner fails closed with a plain-English message and
+  makes no network attempt.
+
 ## Notes
 
 - Equities use DAY orders; crypto uses GTC (Alpaca requirement).

@@ -70,6 +70,16 @@ def cmd_run(args) -> int:
     broker = make_broker(cfg)
     summary = run_cycle(cfg, broker, ledger, discover=not args.no_discover)
     print(json.dumps(summary, indent=2, default=str))
+    if summary.get("positions"):
+        print("\npositions:")
+        for r in summary["positions"]:
+            print(f"  {r['symbol']:>10}  qty {r['quantity']:>12g}  "
+                  f"avg {r['avg_cost']:>10.4f}  mark {r['market_price']:>10.4f}  "
+                  f"P/L {r['unrealized_pnl']:+.2f} ({r['unrealized_pct']:+.2%})")
+    from . import watchdog as watchdog_mod
+    for ev in summary.get("watchdog") or []:
+        if ev.get("status") in ("breach", "unknown", "error"):
+            print(watchdog_mod.format_warning(ev))
     if summary["discoveries"]:
         print("\n*** NEW DISCOVERIES awaiting your approval: trade-paper approvals ***")
     return 0 if not summary["errors"] else 1

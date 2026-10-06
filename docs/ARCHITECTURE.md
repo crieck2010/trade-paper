@@ -49,7 +49,8 @@
 | `discovery.py` | registry screen, multi-asset long/short backtests, pairwise-return correlation filter, composite score |
 | `chain.py` | PM re-rank with diversification tilt; risk-agent review of representative orders; verdict dict |
 | `pipeline.py` | `run_cycle`: the 3×-daily unit of work (fetch → discover → trade approved → reconcile → snapshot) |
-| `ledger.py` | SQLite: runs, orders, order_events, fills, discoveries, approvals, equity_snapshots |
+| `ledger.py` | SQLite: runs, orders, order_events, fills, discoveries, approvals, equity_snapshots, positions, position_snapshots, watchdog_events |
+| `watchdog.py` | validation-staleness check per allowlisted strategy (warn-only, never blocks); registry-first precedence, tier1_evidence fallback |
 | `reconcile.py` | ledger-vs-broker drift report (never silently fixes) |
 | `fidelity.py` | realized vs assumed slippage per strategy |
 | `schedule.py` | slot math, `is_due()`, crontab printer; runner lives on the user's machine (holds the keys) |

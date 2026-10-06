@@ -37,6 +37,12 @@ class RiskConfig:
 
 
 @dataclass
+class WatchdogConfig:
+    staleness_days: int = 90
+    warn_only: bool = True  # warn-only is the only mode: never blocks trading
+
+
+@dataclass
 class BrokerConfig:
     name: str = "alpaca"  # "alpaca" | "fake"
     dry_run: bool = False  # log orders, submit nothing
@@ -57,6 +63,7 @@ class PaperConfig:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     broker: BrokerConfig = field(default_factory=BrokerConfig)
+    watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
 
     @property
     def all_symbols(self) -> list[str]:
@@ -83,7 +90,8 @@ class PaperConfig:
     def from_dict(cls, data: dict) -> "PaperConfig":
         d = dict(data)
         for key, sub in (("discovery", DiscoveryConfig), ("schedule", ScheduleConfig),
-                         ("risk", RiskConfig), ("broker", BrokerConfig)):
+                         ("risk", RiskConfig), ("broker", BrokerConfig),
+                         ("watchdog", WatchdogConfig)):
             if key in d and isinstance(d[key], dict):
                 d[key] = sub(**d[key])
         cfg = cls(**d)

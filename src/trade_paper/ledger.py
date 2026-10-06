@@ -52,6 +52,18 @@ CREATE TABLE IF NOT EXISTS positions (
     symbol TEXT PRIMARY KEY, quantity REAL NOT NULL,
     avg_cost REAL NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS position_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL,
+    run_id INTEGER, symbol TEXT NOT NULL, quantity REAL NOT NULL,
+    avg_cost REAL NOT NULL, market_price REAL NOT NULL,
+    unrealized_pnl REAL NOT NULL, unrealized_pct REAL NOT NULL,
+    weight_pct REAL NOT NULL, note TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS watchdog_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL,
+    run_id INTEGER, strategy TEXT NOT NULL, check_name TEXT NOT NULL,
+    status TEXT NOT NULL, detail TEXT DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS portfolio (
     key TEXT PRIMARY KEY, value TEXT NOT NULL
 );
@@ -288,6 +300,87 @@ class Ledger:
             (utcnow().isoformat(), equity, cash, note),
         )
         self._db.commit()
+
+    def snapshot_positions(self, run_id: int,
+                           positions: list[dict], equity: float,
+                           note: str = "") -> list[dict]:
+        """Log one per-position row for this run and return the computed rows.
+
+        ``positions`` are ``{symbol, quantity, avg_cost, market_price}`` dicts
+        (e.g. mapped from the broker's ``Position`` objects).  Zero-quantity
+        positions are skipped cleanly.  Math:
+          unrealized_pnl = (market_price - avg_cost) * quantity
+              (signed-safe for shorts: a short that went against the book
+              shows negative P/L)
+          unrealized_pct = pnl / |avg_cost * quantity|, 0.0 when the cost
+              basis is zero (divide-by-zero guard)
+          weight_pct = |quantity * market_price| / equity * 100,
+              0.0 when equity is zero (guard)
+        """
+        rows: list[dict] = []
+        now = utcnow().isoformat()
+        for p in positions:
+            qty = float(p.get("quantity") or 0.0)
+            if qty == 0.0:
+                continue  # nothing open: skip, never crash
+            avg = float(p.get("avg_cost") or 0.0)
+            mark = float(p.get("market_price") or 0.0)
+            pnl = (mark - avg) * qty
+            basis = abs(avg * qty)
+            pct = pnl / basis if basis != 0.0 else 0.0
+            market_value = abs(qty * mark)
+            weight = (market_value / equity * 100.0) if equity else 0.0
+            rows.append({
+                "symbol": str(p.get("symbol", "")),
+                "quantity": qty, "avg_cost": avg, "market_price": mark,
+                "unrealized_pnl": pnl, "unrealized_pct": pct,
+                "weight_pct": weight, "note": note,
+            })
+        for r in rows:
+            self._db.execute(
+                """INSERT INTO position_snapshots
+                   (at, run_id, symbol, quantity, avg_cost, market_price,
+                    unrealized_pnl, unrealized_pct, weight_pct, note)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (now, run_id, r["symbol"], r["quantity"], r["avg_cost"],
+                 r["market_price"], r["unrealized_pnl"], r["unrealized_pct"],
+                 r["weight_pct"], r["note"]),
+            )
+        self._db.commit()
+        return rows
+
+    def position_snapshots(self, run_id: int | None = None,
+                           limit: int = 500) -> list[dict]:
+        """Per-position snapshot history (newest first); filter by run."""
+        q = "SELECT * FROM position_snapshots"
+        args: list = []
+        if run_id is not None:
+            q += " WHERE run_id=?"; args.append(run_id)
+        q += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+        return [dict(r) for r in self._db.execute(q, args)]
+
+    # -- watchdog events ------------------------------------------------------
+    def record_watchdog_event(self, run_id: int | None, strategy: str,
+                              check_name: str, status: str,
+                              detail: str = "") -> None:
+        """Append one staleness-check outcome (auditable, additive)."""
+        self._db.execute(
+            """INSERT INTO watchdog_events
+               (at, run_id, strategy, check_name, status, detail)
+               VALUES (?,?,?,?,?,?)""",
+            (utcnow().isoformat(), run_id, strategy, check_name, status, detail),
+        )
+        self._db.commit()
+
+    def watchdog_events(self, strategy: str | None = None,
+                        limit: int = 500) -> list[dict]:
+        """Watchdog event history (newest first); filter by strategy."""
+        q = "SELECT * FROM watchdog_events"
+        args: list = []
+        if strategy:
+            q += " WHERE strategy=?"; args.append(strategy)
+        q += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+        return [dict(r) for r in self._db.execute(q, args)]
 
     def equity_history(self, limit: int = 500) -> list[dict]:
         return [dict(r) for r in self._db.execute(

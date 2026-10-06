@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trade-paper"
-version = "0.5.1"
+version = "0.6.0"
 description = "Paper-trading execution engine for the trade-suite: Alpaca paper broker adapter, read-only Robinhood MCP introspection, order pipeline, discovery chain, and 3x-daily runner."
 readme = "README.md"
 license = { text = "MIT" }

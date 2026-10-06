@@ -1,1 +1,52 @@
-{"assumed_slippage_bps":5.0,"broker":{"api_key_env":"APCA_API_KEY_ID","api_secret_env":"APCA_API_SECRET_KEY","dry_run":false,"name":"alpaca"},"data_source":"delayed","db_path":"trade-paper.db","discovery":{"lookback_days":365,"max_drawdown":0.2,"max_pairwise_correlation":0.6,"min_bars":120,"min_sharpe":1.0,"min_trades":10,"strategy_allowlist":[],"top_n":5},"equity":100000.0,"name":"default","risk":{"kill_switch_enabled":true,"max_daily_loss_pct":0.03,"max_gross_exposure":1.0,"max_position_pct":0.25},"schedule":{"slots":["10:00","13:00","15:30"],"timezone":"America/New_York","weekdays_only":true},"symbols_crypto":["BTC/USD","ETH/USD"],"symbols_equities":["SPY","QQQ","AAPL","MSFT"]}
+{
+  "name": "default",
+  "equity": 100000.0,
+  "symbols_equities": [
+    "SPY",
+    "QQQ",
+    "AAPL",
+    "MSFT"
+  ],
+  "symbols_crypto": [
+    "BTC/USD",
+    "ETH/USD"
+  ],
+  "data_source": "delayed",
+  "db_path": "trade-paper.db",
+  "assumed_slippage_bps": 5.0,
+  "discovery": {
+    "lookback_days": 365,
+    "min_sharpe": 1.0,
+    "max_drawdown": 0.2,
+    "min_trades": 10,
+    "max_pairwise_correlation": 0.6,
+    "top_n": 5,
+    "strategy_allowlist": [],
+    "min_bars": 120
+  },
+  "schedule": {
+    "slots": [
+      "10:00",
+      "13:00",
+      "15:30"
+    ],
+    "timezone": "America/New_York",
+    "weekdays_only": true
+  },
+  "risk": {
+    "max_position_pct": 0.25,
+    "max_gross_exposure": 1.0,
+    "max_daily_loss_pct": 0.03,
+    "kill_switch_enabled": true
+  },
+  "broker": {
+    "name": "alpaca",
+    "dry_run": false,
+    "api_key_env": "APCA_API_KEY_ID",
+    "api_secret_env": "APCA_API_SECRET_KEY"
+  },
+  "watchdog": {
+    "staleness_days": 90,
+    "warn_only": true
+  }
+}

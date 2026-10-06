@@ -43,5 +43,9 @@
     "dry_run": true,
     "api_key_env": "APCA_API_KEY_ID",
     "api_secret_env": "APCA_API_SECRET_KEY"
+  },
+  "watchdog": {
+    "staleness_days": 90,
+    "warn_only": true
   }
 }

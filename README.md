@@ -25,7 +25,8 @@ trade-data-* ──bars──▶ trade-agents Desk ──orders──▶ trade-r
   discover → trade approved strategies → reconcile → snapshot equity.
   Default slots 10:00 / 13:00 / 15:30 America/New_York, weekdays.
 - **Audit ledger** — SQLite record of every order state transition, fill,
-  approval, discovery, and equity snapshot. Any decision can be replayed.
+  approval, discovery, equity snapshot, **per-position snapshot**, and
+  **watchdog check**. Any decision can be replayed.
 - **Idempotency** — deterministic client order IDs, so a crash-and-retry can
   never double-submit.
 - **Reconciliation** — diffs the ledger against the broker's actual positions
@@ -82,6 +83,53 @@ See [`examples/paper-config.json`](examples/paper-config.json). Key sections:
 | `schedule` | 3×-daily slots, timezone, weekdays-only |
 | `risk` | pre-trade limits re-checked against live positions |
 | `broker` | `alpaca` (paper) or `fake`; `dry_run` logs without submitting |
+
+## Ledger schema
+
+The SQLite ledger (`db_path` in the config) is the audit trail. New tables
+are added with `CREATE TABLE IF NOT EXISTS`, so an old ledger gains them
+on first open with no data loss:
+
+| Table | One row per … |
+|---|---|
+| `runs` | runner cycle (kind, symbols, ok) |
+| `orders` | order with client id, side, qty, strategy, state |
+| `order_events` | order state transition |
+| `fills` | broker fill (immutable source of the position book) |
+| `discoveries` | screened strategy candidate |
+| `approvals` | discovery awaiting/decided by the user |
+| `equity_snapshots` | run-level equity + cash |
+| `positions` | current position book (derived from fills, `quantity`/`avg_cost`) |
+| `position_snapshots` | **per-position MTM row per run** — symbol, qty, avg cost, broker mark, unrealized P/L + %, portfolio weight |
+| `watchdog_events` | staleness-check outcome per strategy per run |
+| `portfolio` | key/value state (seeded cash) |
+
+`run` prints one line per open position after the summary:
+`AAA qty 10 avg 98.3399 mark 98.2908 P/L -0.49 (-0.05%)`.
+Unrealized P/L is `(mark − avg_cost) × qty` (signed-safe for shorts);
+`%` is P/L ÷ `|avg_cost × qty|`; weight is `|qty × mark| ÷ equity`.
+
+## Staleness watchdog
+
+Every cycle, `trade_paper.watchdog` checks each allowlisted strategy's
+last validation date and warns when it is older than
+`watchdog.staleness_days` (default 90). It is **warn-only** (`warn_only:
+true` is the code default and the shipped value): a breach prints a
+`WARNING` line in the run output and appends a row to `watchdog_events`,
+but it can never block, veto, or alter orders — there are no raise paths
+in warn mode, and a broken registry or missing evidence file degrades to
+`status="unknown"` instead of crashing the run.
+
+Source precedence, documented in the module docstring:
+
+1. **Trade-lifecycle registry first** (`~/.trade-lifecycle/registry.jsonl`):
+   the latest `transition` event moving the strategy INTO the `VALIDATED`
+   state — the machine-readable record of the actual gate decision
+   (Charlie's approval, timestamped).
+2. **`tier1_evidence.json` fallback**: `evaluated_at` in
+   `trade-strategies/docs/validation/<slug>/tier1_evidence.json`, used
+   only when the registry has no record (it timestamps when the evidence
+   was computed, not when the strategy was admitted as validated).
 
 ## Strategy lifecycle
 

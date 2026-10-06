@@ -1,6 +1,43 @@
 # Changelog
 
-## v0.5.1 — 2026-10-01
+## v0.6.0 — 2026-10-06
+
+- **Per-position ledger logging (Feature A).** New additive
+  `position_snapshots` table (`CREATE TABLE IF NOT EXISTS` on ledger open —
+  old ledgers gain it with no data loss): one row per open position per
+  run, written right after the equity snapshot, with broker mark,
+  unrealized P/L (`(mark − avg_cost) × qty`, signed-safe for shorts),
+  unrealized % (`pnl / |avg_cost × qty|`, zero-cost-basis guarded), and
+  portfolio weight (`|qty × mark| / equity × 100`, zero-equity guarded).
+  Zero-quantity positions are skipped cleanly. `run` prints one line per
+  position (symbol, qty, avg cost, mark, unrealized P/L + %).
+  `tests/test_position_snapshots.py`: 7 tests (long + short P/L math,
+  zero-qty edge, divide-by-zero guards, migration of a pre-table DB with
+  existing data intact, end-to-end run writes snapshots). README gains a
+  "Ledger schema" section.
+- **Staleness watchdog (Feature B).** New `trade_paper.watchdog` module:
+  for each strategy in the runner's allowlist it resolves the last
+  validation date — **preferring** the trade-lifecycle registry
+  (`~/.trade-lifecycle/registry.jsonl`, latest `transition` INTO the
+  `VALIDATED` state, i.e. the actual gate decision), **falling back** to
+  the strategy's `tier1_evidence.json` `evaluated_at` only when the
+  registry has no record (precedence documented in the module docstring).
+  A breach (> `staleness_days`) prints a clear WARNING in run output and
+  appends to the new additive `watchdog_events` ledger table. It is
+  **warn-only by default** (`watchdog: {staleness_days: 90, warn_only:
+  true}` in `paper-config-regcond1.json` and the config defaults): no
+  raise paths, no blocking or altering of trading — broken registry or
+  missing evidence degrades to `status="unknown"`. `tests/test_watchdog.py`:
+  11 tests (89/91-day boundary at 90, latest-transition wins,
+  registry-over-evidence precedence, missing-registry fallback, unknown
+  without crash, malformed lines, warn-only never raises even on breach
+  or broken registry, breach writes a ledger event, config
+  defaults/round-trip). README gains a "Staleness watchdog" section.
+- **Version fix:** `trade_paper.__version__` was stale at `0.5.0` while
+  pyproject said `0.5.1`; both now read `0.6.0`.
+- REGCOND-1's execution path (production strategy → risk gate → orders →
+  fills → reconcile) is untouched: the new writes are observability only,
+  additive after the equity snapshot.
 
 - **Fixed `AlpacaBroker.get_account` mislabeling equity as day P&L.** It now
   reports `equity - last_equity` (the prior trading day's closing equity --

@@ -315,6 +315,25 @@ def run_cycle(cfg: PaperConfig, broker: Broker, ledger: Ledger,
         ledger.snapshot_equity(acct.equity, acct.cash, note=f"run {run_id}")
         summary["equity"] = acct.equity
         summary["cash"] = acct.cash
+        # -- per-position snapshot + staleness watchdog (observability only) --
+        # Additive: reads broker marks, writes ledger rows, never touches
+        # the order/trading path above.
+        from . import watchdog as watchdog_mod
+        broker_positions = broker.get_positions()
+        summary["positions"] = ledger.snapshot_positions(
+            run_id,
+            [{"symbol": p.symbol, "quantity": float(p.quantity),
+              "avg_cost": float(p.avg_entry_price),
+              "market_price": float(p.market_price)}
+             for p in broker_positions],
+            equity=float(acct.equity))
+        strategies = sorted({s for s, _ in allow})
+        summary["watchdog"] = [ev.as_dict() for ev in
+                               watchdog_mod.check_strategies(
+                                   strategies,
+                                   staleness_days=cfg.watchdog.staleness_days,
+                                   warn_only=cfg.watchdog.warn_only,
+                                   ledger=ledger, run_id=run_id)]
         ledger.finish_run(run_id, ok=True)
     except Exception as exc:  # never crash the scheduler silently
         summary["errors"].append(str(exc))

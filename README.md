@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> **Consolidated into [TradeSuite](https://github.com/crieck2010/trade-suite)**  
+> This engine has been consolidated into the unified [TradeSuite monorepo](https://github.com/crieck2010/trade-suite). Active development, bug fixes, releases, and unified testing now live in `trade-suite`. This repository is preserved as an archive.
+
 # trade-paper
 
 Paper-trading execution engine for the [trade-suite](https://github.com/crieck2010/trade-suite).
